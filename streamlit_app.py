@@ -1,151 +1,355 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import io
+from datetime import datetime
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# Page config
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Google Shopping Title Optimizer",
+    page_icon="🛒",
+    layout="wide"
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Title rules
+TITLE_RULES = {
+    'max_length': 150,
+    'optimal_min': 70,
+    'optimal_max': 150,
+    'avoid_words': ['sale', 'free shipping', 'best', 'cheap', 'buy now', 'new', 'hot', '!']
+}
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def analyze_title_quality(title):
+    """Analyze title quality and return score and issues"""
+    issues = []
+    score = 100
+    
+    # Length check
+    if len(title) > TITLE_RULES['max_length']:
+        issues.append(f"Exceeds {TITLE_RULES['max_length']} chars ({len(title)})")
+        score -= 30
+    elif len(title) < TITLE_RULES['optimal_min']:
+        issues.append(f"Under optimal length ({len(title)} < 70)")
+        score -= 10
+    
+    # Check for banned words
+    title_lower = title.lower()
+    for word in TITLE_RULES['avoid_words']:
+        if word in title_lower:
+            issues.append(f'Contains "{word}"')
+            score -= 15
+    
+    # Check capitalization
+    if title.isupper() and len(title) > 10:
+        issues.append("Avoid ALL CAPS")
+        score -= 10
+    
+    # Check for excessive symbols
+    if '!' in title:
+        issues.append("Remove exclamation marks")
+        score -= 5
+    
+    return max(score, 0), issues
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+def generate_title_variants(product):
+    """Generate 5 title variants based on Google best practices"""
+    variants = []
+    
+    brand = product.get('brand', '')
+    title = product.get('title', '')
+    color = product.get('color', '')
+    size = product.get('size', '')
+    material = product.get('material', '')
+    product_type = product.get('product_type', '') or product.get('google_product_category', '')
+    
+    # Variant 1: Brand First (Google Recommended)
+    if brand and title:
+        parts = [brand, title]
+        if color:
+            parts.append(color)
+        if size:
+            parts.append(size)
+        v1_title = ' - '.join(parts)[:150]
+        score, issues = analyze_title_quality(v1_title)
+        variants.append({
+            'formula': 'Brand First',
+            'title': v1_title,
+            'description': 'Google recommended structure',
+            'score': score,
+            'issues': '; '.join(issues) if issues else 'None',
+            'length': len(v1_title)
+        })
+    
+    # Variant 2: Product First
+    if title and brand:
+        parts = [title, brand]
+        if color:
+            parts.append(color)
+        if size:
+            parts.append(size)
+        v2_title = ' - '.join(parts)[:150]
+        score, issues = analyze_title_quality(v2_title)
+        variants.append({
+            'formula': 'Product First',
+            'title': v2_title,
+            'description': 'Product name leading',
+            'score': score,
+            'issues': '; '.join(issues) if issues else 'None',
+            'length': len(v2_title)
+        })
+    
+    # Variant 3: Attribute Rich
+    parts = []
+    if brand:
+        parts.append(brand)
+    if product_type:
+        parts.append(product_type)
+    if color:
+        parts.append(color)
+    if size:
+        parts.append(size)
+    if material:
+        parts.append(material)
+    
+    if len(parts) >= 3:
+        v3_title = ' - '.join(parts)[:150]
+        score, issues = analyze_title_quality(v3_title)
+        variants.append({
+            'formula': 'Attribute Rich',
+            'title': v3_title,
+            'description': 'Maximum attributes',
+            'score': score,
+            'issues': '; '.join(issues) if issues else 'None',
+            'length': len(v3_title)
+        })
+    
+    # Variant 4: Compact (Pipe separator)
+    if brand and title:
+        parts = [brand, title]
+        if color:
+            parts.append(color)
+        if size:
+            parts.append(size)
+        v4_title = ' | '.join(parts)[:150]
+        score, issues = analyze_title_quality(v4_title)
+        variants.append({
+            'formula': 'Compact',
+            'title': v4_title,
+            'description': 'Space-efficient format',
+            'score': score,
+            'issues': '; '.join(issues) if issues else 'None',
+            'length': len(v4_title)
+        })
+    
+    # Variant 5: Natural Language
+    if brand and title:
+        natural = f"{brand} {title}"
+        if color:
+            natural += f" in {color}"
+        if size:
+            natural += f", {size}"
+        v5_title = natural[:150]
+        score, issues = analyze_title_quality(v5_title)
+        variants.append({
+            'formula': 'SEO Natural',
+            'title': v5_title,
+            'description': 'Natural language format',
+            'score': score,
+            'issues': '; '.join(issues) if issues else 'None',
+            'length': len(v5_title)
+        })
+    
+    return variants
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Initialize session state
+if 'products' not in st.session_state:
+    st.session_state.products = None
+if 'variants' not in st.session_state:
+    st.session_state.variants = {}
+if 'test_data' not in st.session_state:
+    st.session_state.test_data = {}
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Header
+st.title("🛒 Google Shopping Title Optimizer")
+st.markdown("Scientific A/B testing based on Google best practices")
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# Stats row
+col1, col2, col3 = st.columns(3)
+with col1:
+    product_count = len(st.session_state.products) if st.session_state.products is not None else 0
+    st.metric("Products Loaded", product_count)
+with col2:
+    variant_count = sum(len(v) for v in st.session_state.variants.values())
+    st.metric("Variants Generated", variant_count)
+with col3:
+    st.metric("Testing Formulas", 5)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+# Info box
+st.info("📘 **Best Practices Applied:** 150 char max, Brand-first priority, No promotional terms, Multiple formula testing")
 
-    return gdp_df
+# File upload
+uploaded_file = st.file_uploader("Upload Product Feed (CSV or TSV)", type=['csv', 'tsv', 'txt'])
 
-gdp_df = get_gdp_data()
+if uploaded_file is not None:
+    try:
+        # Detect separator
+        content = uploaded_file.read().decode('utf-8')
+        separator = '\t' if '\t' in content.split('\n')[0] else ','
+        
+        # Read CSV
+        df = pd.read_csv(io.StringIO(content), sep=separator)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        # Add ID if not present
+        if 'id' not in df.columns:
+            df['id'] = [f'product_{i+1}' for i in range(len(df))]
+        
+        st.session_state.products = df
+        st.success(f"✅ Loaded {len(df)} products")
+        
+    except Exception as e:
+        st.error(f"Error loading file: {str(e)}")
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+# Display products
+if st.session_state.products is not None:
+    st.markdown("---")
+    st.subheader("Product Catalog")
+    
+    for idx, row in st.session_state.products.iterrows():
+        product_id = row.get('id', f'product_{idx}')
+        
+        with st.expander(f"📦 {row.get('title', 'Untitled Product')} (ID: {product_id})"):
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"**Brand:** {row.get('brand', 'N/A')}")
+                st.markdown(f"**Product Type:** {row.get('product_type', 'N/A')}")
+                st.markdown(f"**Color:** {row.get('color', 'N/A')} | **Size:** {row.get('size', 'N/A')}")
+            
+            with col2:
+                if st.button("🔄 Generate Variants", key=f"gen_{product_id}"):
+                    variants = generate_title_variants(row.to_dict())
+                    st.session_state.variants[product_id] = variants
+                    # Initialize test data
+                    st.session_state.test_data[product_id] = {
+                        v['formula']: {'impressions': 0, 'clicks': 0, 'conversions': 0}
+                        for v in variants
+                    }
+                    st.rerun()
+            
+            # Display variants if generated
+            if product_id in st.session_state.variants:
+                st.markdown("### 📊 Title Variants & A/B Testing")
+                
+                for variant in st.session_state.variants[product_id]:
+                    formula = variant['formula']
+                    
+                    # Score color
+                    if variant['score'] >= 90:
+                        score_color = "🟢"
+                    elif variant['score'] >= 70:
+                        score_color = "🟡"
+                    else:
+                        score_color = "🔴"
+                    
+                    st.markdown(f"**{score_color} {formula}** (Score: {variant['score']}/100)")
+                    st.markdown(f"_{variant['description']} | Length: {variant['length']}_")
+                    st.code(variant['title'], language=None)
+                    
+                    if variant['issues'] != 'None':
+                        st.warning(f"⚠️ Issues: {variant['issues']}")
+                    
+                    # Test metrics input
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        impressions = st.number_input(
+                            "Impressions",
+                            min_value=0,
+                            value=st.session_state.test_data.get(product_id, {}).get(formula, {}).get('impressions', 0),
+                            key=f"imp_{product_id}_{formula}"
+                        )
+                    
+                    with col2:
+                        clicks = st.number_input(
+                            "Clicks",
+                            min_value=0,
+                            value=st.session_state.test_data.get(product_id, {}).get(formula, {}).get('clicks', 0),
+                            key=f"click_{product_id}_{formula}"
+                        )
+                    
+                    with col3:
+                        ctr = (clicks / impressions * 100) if impressions > 0 else 0
+                        st.metric("CTR %", f"{ctr:.2f}")
+                    
+                    with col4:
+                        conversions = st.number_input(
+                            "Conversions",
+                            min_value=0,
+                            value=st.session_state.test_data.get(product_id, {}).get(formula, {}).get('conversions', 0),
+                            key=f"conv_{product_id}_{formula}"
+                        )
+                    
+                    # Update test data
+                    if product_id not in st.session_state.test_data:
+                        st.session_state.test_data[product_id] = {}
+                    st.session_state.test_data[product_id][formula] = {
+                        'impressions': impressions,
+                        'clicks': clicks,
+                        'ctr': ctr,
+                        'conversions': conversions
+                    }
+                    
+                    st.markdown("---")
+                
+                # Show winner
+                test_data = st.session_state.test_data.get(product_id, {})
+                if test_data:
+                    max_ctr = 0
+                    winner = None
+                    for formula, data in test_data.items():
+                        if data['ctr'] > max_ctr:
+                            max_ctr = data['ctr']
+                            winner = formula
+                    
+                    if winner and max_ctr > 0:
+                        st.success(f"🏆 **Winner:** {winner} (CTR: {max_ctr:.2f}%)")
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
+# Export button
+if st.session_state.variants:
+    st.markdown("---")
+    if st.button("📥 Export All Results"):
+        export_data = []
+        
+        for product_id, variants in st.session_state.variants.items():
+            product = st.session_state.products[st.session_state.products['id'] == product_id].iloc[0]
+            
+            for variant in variants:
+                test_data = st.session_state.test_data.get(product_id, {}).get(variant['formula'], {})
+                
+                export_data.append({
+                    'product_id': product_id,
+                    'original_title': product.get('title', ''),
+                    'formula': variant['formula'],
+                    'new_title': variant['title'],
+                    'quality_score': variant['score'],
+                    'issues': variant['issues'],
+                    'length': variant['length'],
+                    'impressions': test_data.get('impressions', 0),
+                    'clicks': test_data.get('clicks', 0),
+                    'ctr': test_data.get('ctr', 0),
+                    'conversions': test_data.get('conversions', 0)
+                })
+        
+        df_export = pd.DataFrame(export_data)
+        
+        # Convert to TSV
+        tsv = df_export.to_csv(sep='\t', index=False)
+        
+        st.download_button(
+            label="Download TSV",
+            data=tsv,
+            file_name=f"shopping_titles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.tsv",
+            mime="text/tab-separated-values"
         )
+        
+        st.success("✅ Ready to download!")
