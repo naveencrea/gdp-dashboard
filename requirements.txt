@@ -1,11 +1,2 @@
 txtstreamlit>=1.28.0
 pandas>=2.0.0
-```
-
-## 📁 Your Repository Structure Should Be:
-```
-your-repo/
-├── .devcontainer/
-│   └── devcontainer.json  (your existing file - keep it!)
-├── streamlit_app.py       (replace with the code above)
-└── requirements.txt       (create this new file)
